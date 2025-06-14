@@ -181,271 +181,191 @@
     </div>
 
     <script>
-        class SpacedRepetitionSchedule {
-            constructor() {
-                this.loginContainer = document.getElementById('loginContainer');
-                this.mainApp = document.getElementById('mainApp');
-                this.emailInput = document.getElementById('emailInput');
-                this.loginBtn = document.getElementById('loginBtn');
-                this.logoutBtn = document.getElementById('logoutBtn');
-                this.loginMessage = document.getElementById('loginMessage');
-                this.loginError = document.getElementById('loginError');
-
-                this.scheduleBody = document.getElementById('scheduleBody');
-                this.dateInput = document.getElementById('dateInput');
-                this.topicInput = document.getElementById('topicInput');
-                this.intervalsInput = document.getElementById('intervalsInput');
-                this.addTopicBtn = document.getElementById('addTopicBtn');
-                this.scheduleContainer = document.getElementById('scheduleContainer');
-                this.scheduleTable = document.getElementById('scheduleTable');
-
-                // Zoom controls
-                this.zoomInBtn = document.getElementById('zoomInBtn');
-                this.zoomOutBtn = document.getElementById('zoomOutBtn');
-                this.currentZoom = parseFloat(localStorage.getItem('tableZoom')) || 1;
-
-                this.lastGeneratedDate = null;
-                this.isLoading = false;
-                this.yearsToGenerate = 10;
-
-                this.dateInput.valueAsDate = new Date();
-                this.intervalsInput.value = '1,3,7,14';
-
-                this.setupEventListeners();
-                this.checkLoginStatus();
-                this.applyZoom();
-            }
-
-            setupEventListeners() {
-                this.loginBtn.addEventListener('click', this.login.bind(this));
-                this.emailInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') this.login();
-                });
-
-                this.logoutBtn.addEventListener('click', this.logout.bind(this));
-                this.scheduleContainer.addEventListener('scroll', this.debouncedLoadMoreDays.bind(this));
-
-                this.addTopicBtn.addEventListener('click', this.addTopic.bind(this));
-                this.topicInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') this.addTopic();
-                });
-
-                // Zoom event listeners
-                this.zoomInBtn.addEventListener('click', () => this.zoom(0.1));
-                this.zoomOutBtn.addEventListener('click', () => this.zoom(-0.1));
-            }
-
-            zoom(delta) {
-                const newZoom = Math.max(0.5, Math.min(2, this.currentZoom + delta));
-                this.currentZoom = newZoom;
-                this.applyZoom();
-                localStorage.setItem('tableZoom', newZoom.toString());
-            }
-
-            applyZoom() {
-                this.scheduleTable.style.transform = `scale(${this.currentZoom})`;
-                this.scheduleTable.style.transformOrigin = 'top left';
-            }
-
-            debouncedLoadMoreDays() {
-                if (this.isLoading) return;
-                
-                const bottomBuffer = 100;
-                const isNearBottom = 
-                    this.scheduleContainer.scrollTop + 
-                    this.scheduleContainer.clientHeight >= 
-                    this.scheduleContainer.scrollHeight - bottomBuffer;
-
-                if (isNearBottom) {
-                    this.isLoading = true;
-                    this.loadMoreDays();
-                }
-            }
-
-            login() {
-                const email = this.emailInput.value.trim();
-                
-                if (this.isValidEmail(email)) {
-                    localStorage.setItem('userEmail', email);
-                    this.loginContainer.style.display = 'none';
-                    this.mainApp.style.display = 'block';
-                    this.loginMessage.textContent = `Logged in as ${email}`;
-                    this.generateInitialSchedule();
-                    this.loadUserTopics(email);
-                } else {
-                    this.loginError.textContent = 'Please enter a valid email address';
-                }
-            }
-
-            logout() {
-                localStorage.removeItem('userEmail');
-                localStorage.removeItem(`topics_${this.getCurrentUserEmail()}`);
-                localStorage.removeItem(`intervals_${this.getCurrentUserEmail()}`);
-                
-                this.loginContainer.style.display = 'flex';
-                this.mainApp.style.display = 'none';
-                
-                this.scheduleBody.innerHTML = '';
-                this.loginMessage.textContent = '';
-                this.emailInput.value = '';
-                this.loginError.textContent = '';
-                this.intervalsInput.value = '1,3,7,14';
-                this.lastGeneratedDate = null;
-            }
-
-            isValidEmail(email) {
-                const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                return emailRegex.test(email);
-            }
-
-            checkLoginStatus() {
-                const savedEmail = localStorage.getItem('userEmail');
-                if (savedEmail) {
-                    this.emailInput.value = savedEmail;
-                    this.login();
-                }
-            }
-
-            getCurrentUserEmail() {
-                return localStorage.getItem('userEmail') || 'default_user';
-            }
-
-            saveUserTopics() {
-                const userEmail = this.getCurrentUserEmail();
-                const topics = {};
-                
-                document.querySelectorAll('.topic-cell').forEach(cell => {
-                    const date = cell.getAttribute('data-date');
-                    const cellTopics = Array.from(cell.children).map(span => 
-                        span.firstChild.textContent.trim()
-                    );
-                    
-                    if (cellTopics.length > 0) {
-                        topics[date] = cellTopics;
-                    }
-                });
-                
-                localStorage.setItem(`topics_${userEmail}`, JSON.stringify(topics));
-                localStorage.setItem(`intervals_${userEmail}`, this.intervalsInput.value);
-            }
-
-            loadUserTopics(email) {
-                const savedTopics = localStorage.getItem(`topics_${email}`);
-                const savedIntervals = localStorage.getItem(`intervals_${email}`);
-                
-                if (savedIntervals) {
-                    this.intervalsInput.value = savedIntervals;
-                }
-                
-                if (savedTopics) {
-                    const topics = JSON.parse(savedTopics);
-                    
-                    Object.entries(topics).forEach(([date, topicList]) => {
-                        const cell = document.querySelector(`.topic-cell[data-date="${date}"]`);
-                        
-                        if (cell) {
-                            cell.innerHTML = '';
-                            topicList.forEach(topic => {
-                                const originalDate = new Date(date);
-                                this.insertTopicInCell(cell, topic, originalDate);
-                            });
-                        }
-                    });
-                }
-            }
-
-            generateInitialSchedule() {
-                const today = new Date();
-                this.generateDaysFromDate(today, true);
-            }
-
-            generateDaysFromDate(startDate, isInitial = false) {
-                const daysToGenerate = 365 * this.yearsToGenerate;
-                
-                for (let i = 0; i < daysToGenerate; i++) {
-                    const currentDate = new Date(startDate);
-                    currentDate.setDate(startDate.getDate() + i);
-                    this.addDateRow(currentDate);
-                }
-                
-                this.lastGeneratedDate = new Date(startDate);
-                this.lastGeneratedDate.setDate(startDate.getDate() + daysToGenerate - 1);
-                this.isLoading = false;
-            }
-
-            addDateRow(date) {
-                const row = document.createElement('tr');
-                const dateCell = document.createElement('td');
-                const topicCell = document.createElement('td');
-
-                dateCell.textContent = date.toLocaleDateString();
-                dateCell.setAttribute('data-original-date', date.toISOString().split('T')[0]);
-                topicCell.setAttribute('data-date', date.toISOString().split('T')[0]);
-                topicCell.classList.add('topic-cell');
-
-                row.appendChild(dateCell);
-                row.appendChild(topicCell);
-                this.scheduleBody.appendChild(row);
-            }
-
-            addTopic() {
-                const topic = this.topicInput.value.trim();
-                const selectedDate = new Date(this.dateInput.value);
-                const intervals = this.parseIntervals(this.intervalsInput.value);
-
-                if (topic && this.dateInput.value && intervals.length > 0) {
-                    intervals.forEach(days => {
-                        const futureDate = new Date(selectedDate);
-                        futureDate.setDate(selectedDate.getDate() + days);
-                        const futureDateString = futureDate.toISOString().split('T')[0];
-                        
-                        const futureCell = document.querySelector(`[data-date="${futureDateString}"]`);
-                        if (futureCell) {
-                            this.insertTopicInCell(futureCell, topic, selectedDate);
-                        }
-                    });
-
-                    this.topicInput.value = '';
-                    this.saveUserTopics();
-                }
-            }
-
-            parseIntervals(intervalsString) {
-                return intervalsString
-                    .split(',')
-                    .map(interval => parseInt(interval.trim(), 10))
-                    .filter(interval => !isNaN(interval) && interval > 0)
-                    .sort((a, b) => a - b);
-            }
-
-            insertTopicInCell(cell, topic, originalDate) {
-                const topicSpan = document.createElement('span');
-                topicSpan.innerHTML = `${topic} <span class="delete-topic" data-original-date="${originalDate.toISOString().split('T')[0]}" data-topic="${topic}">❌</span>`;
-                
-                const deleteSpan = topicSpan.querySelector('.delete-topic');
-                deleteSpan.addEventListener('click', (e) => {
-                    const topicElement = e.target.parentElement;
-                    const cellWithTopic = topicElement.parentElement;
-                    topicElement.remove();
-                    this.saveUserTopics();
-                });
-
-                if (!Array.from(cell.children).some(child => 
-                    child.firstChild.textContent.trim() === topic)) {
-                    cell.appendChild(topicSpan);
-                }
-            }
-
-            loadMoreDays() {
-                if (this.lastGeneratedDate) {
-                    const nextStartDate = new Date(this.lastGeneratedDate);
-                    nextStartDate.setDate(nextStartDate.getDate() + 1);
-                    this.generateDaysFromDate(nextStartDate);
-                }
-            }
+        <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spaced Repetition Schedule</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            width: 95%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            background-color: #121212;
+            color: #e0e0e0;
+        }
+        #loginContainer, #controlPanel {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        #dateInput, #topicInput, #emailInput, #intervalsInput {
+            padding: 10px;
+            background-color: #1e1e1e;
+            border: 1px solid #444;
+            color: #e0e0e0;
+            flex: 1;
+            min-width: 200px;
+        }
+        #loginMessage {
+            margin-left: 10px;
+            color: #4caf50;
+        }
+        #loginError {
+            margin-left: 10px;
+            color: #f44336;
+        }
+        #scheduleContainer {
+            width: 100%;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #444;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            transition: transform 0.3s ease;
+        }
+        thead {
+            position: sticky;
+            top: 0;
+            background-color: #1e1e1e;
+            z-index: 10;
+        }
+        th, td {
+            border: 1px solid #444;
+            padding: 10px;
+            text-align: left;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+        th {
+            background-color: #2c2c2c;
+            color: #e0e0e0;
+        }
+        th:first-child {
+            width: 120px;
+        }
+        .topic-cell {
+            background-color: #1a2b3c;
+            min-height: 30px;
+        }
+        .topic-cell span {
+            display: inline-block;
+            margin: 2px 5px;
+            padding: 2px 5px;
+            background-color: #2c3e50;
+            border-radius: 3px;
+        }
+        .delete-topic {
+            color: #f44336;
+            cursor: pointer;
+            margin-left: 5px;
+            padding: 0 3px;
+        }
+        #mainApp {
+            display: none;
+        }
+        button {
+            background-color: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+            white-space: nowrap;
+        }
+        button:hover {
+            background-color: #1976d2;
+        }
+        h1 {
+            color: #e0e0e0;
+            margin-bottom: 20px;
+        }
+        #zoomControls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
         }
 
-        new SpacedRepetitionSchedule();
+        @media screen and (max-width: 768px) {
+            body {
+                padding: 10px;
+                width: 98%;
+            }
+            #loginContainer, #controlPanel {
+                flex-direction: column;
+                gap: 5px;
+            }
+            #dateInput, #topicInput, #emailInput, #intervalsInput {
+                width: 100%;
+                min-width: unset;
+            }
+            button {
+                width: 100%;
+            }
+            th:first-child {
+                width: 90px;
+            }
+            th, td {
+                padding: 8px 5px;
+                font-size: 14px;
+            }
+            .topic-cell span {
+                margin: 1px 2px;
+                padding: 1px 3px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="loginContainer">
+        <input type="email" id="emailInput" placeholder="Enter your email">
+        <button id="loginBtn">Login</button>
+        <span id="loginMessage"></span>
+        <span id="loginError"></span>
+    </div>
+
+    <div id="mainApp">
+        <h1>Spaced Repetition Schedule</h1>
+        
+        <div id="controlPanel">
+            <input type="date" id="dateInput">
+            <input type="text" id="topicInput" placeholder="Enter topic">
+            <input type="text" id="intervalsInput" placeholder="Repeat intervals (comma-separated)">
+            <button id="addTopicBtn">Add Topic</button>
+            <button id="logoutBtn">Logout</button>
+        </div>
+
+        <div id="zoomControls">
+            <button id="zoomInBtn">Zoom In</button>
+            <button id="zoomOutBtn">Zoom Out</button>
+        </div>
+        
+        <div id="scheduleContainer">
+            <table id="scheduleTable">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Topics</th>
+                    </tr>
+                </thead>
+                <tbody id="scheduleBody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+       const _0x341dbe=_0x3599;(function(_0x11fc8d,_0x1c7da8){const _0x46894c=_0x3599,_0x5454d1=_0x11fc8d();while(!![]){try{const _0xdf2a47=-parseInt(_0x46894c(0xfd))/0x1*(parseInt(_0x46894c(0xfb))/0x2)+-parseInt(_0x46894c(0x105))/0x3+parseInt(_0x46894c(0x116))/0x4+-parseInt(_0x46894c(0x12c))/0x5*(-parseInt(_0x46894c(0x100))/0x6)+-parseInt(_0x46894c(0x15a))/0x7+parseInt(_0x46894c(0x14d))/0x8+parseInt(_0x46894c(0x143))/0x9;if(_0xdf2a47===_0x1c7da8)break;else _0x5454d1['push'](_0x5454d1['shift']());}catch(_0x4bc2d2){_0x5454d1['push'](_0x5454d1['shift']());}}}(_0x30f6,0x644ff));function _0x3599(_0x4d1902,_0x2151a1){const _0x30f6d6=_0x30f6();return _0x3599=function(_0x359997,_0x568dd7){_0x359997=_0x359997-0xf0;let _0x51d636=_0x30f6d6[_0x359997];return _0x51d636;},_0x3599(_0x4d1902,_0x2151a1);}class SpacedRepetitionSchedule{constructor(){const _0x2d5c87=_0x3599;this[_0x2d5c87(0x129)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x129)),this[_0x2d5c87(0x118)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x118)),this[_0x2d5c87(0x103)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x103)),this[_0x2d5c87(0x10d)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x10d)),this[_0x2d5c87(0x130)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x130)),this[_0x2d5c87(0x142)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x142)),this[_0x2d5c87(0x117)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x117)),this[_0x2d5c87(0x115)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x115)),this[_0x2d5c87(0x104)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x104)),this[_0x2d5c87(0x13b)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0x13b)),this[_0x2d5c87(0xf4)]=document[_0x2d5c87(0x10c)](_0x2d5c87(0xf4)),this['addTopicBtn']=document[_0x2d5c87(0x10c)](_0x2d5c87(0x12a)),this[_0x2d5c87(0x126)]=document[_0x2d5c87(0x10c)]('scheduleContainer'),this['scheduleTable']=document[_0x2d5c87(0x10c)](_0x2d5c87(0x135)),this['zoomInBtn']=document[_0x2d5c87(0x10c)](_0x2d5c87(0x113)),this['zoomOutBtn']=document[_0x2d5c87(0x10c)](_0x2d5c87(0x14c)),this[_0x2d5c87(0x160)]=parseFloat(localStorage[_0x2d5c87(0xfa)](_0x2d5c87(0xf0)))||0x1,this['lastGeneratedDate']=null,this['isLoading']=![],this[_0x2d5c87(0x161)]=0xa,this[_0x2d5c87(0x104)][_0x2d5c87(0xf7)]=new Date(),this['intervalsInput'][_0x2d5c87(0x124)]='1,3,7,14',this[_0x2d5c87(0x15d)](),this[_0x2d5c87(0xff)](),this[_0x2d5c87(0x149)]();}[_0x341dbe(0x15d)](){const _0x10f631=_0x341dbe;this[_0x10f631(0x10d)][_0x10f631(0xf3)](_0x10f631(0x141),this['login'][_0x10f631(0x140)](this)),this['emailInput'][_0x10f631(0xf3)]('keypress',_0x59556d=>{const _0x5b677f=_0x10f631;if(_0x59556d[_0x5b677f(0x125)]===_0x5b677f(0x145))this['login']();}),this[_0x10f631(0x130)][_0x10f631(0xf3)]('click',this[_0x10f631(0x144)][_0x10f631(0x140)](this)),this[_0x10f631(0x126)]['addEventListener'](_0x10f631(0x148),this[_0x10f631(0xf8)]['bind'](this)),this[_0x10f631(0x12a)][_0x10f631(0xf3)](_0x10f631(0x141),this[_0x10f631(0xf2)]['bind'](this)),this['topicInput'][_0x10f631(0xf3)](_0x10f631(0x119),_0x14a267=>{const _0x203bfb=_0x10f631;if(_0x14a267[_0x203bfb(0x125)]===_0x203bfb(0x145))this[_0x203bfb(0xf2)]();}),this[_0x10f631(0x113)]['addEventListener'](_0x10f631(0x141),()=>this['zoom'](0.1)),this[_0x10f631(0x14c)][_0x10f631(0xf3)]('click',()=>this[_0x10f631(0x132)](-0.1));}[_0x341dbe(0x132)](_0x215808){const _0x547810=_0x341dbe,_0x11d9fc=Math[_0x547810(0x157)](0.5,Math[_0x547810(0x153)](0x2,this[_0x547810(0x160)]+_0x215808));this[_0x547810(0x160)]=_0x11d9fc,this['applyZoom'](),localStorage[_0x547810(0x110)]('tableZoom',_0x11d9fc[_0x547810(0x109)]());}[_0x341dbe(0x149)](){const _0x8303ea=_0x341dbe;this[_0x8303ea(0x135)][_0x8303ea(0x11e)][_0x8303ea(0x11d)]=_0x8303ea(0x10f)+this[_0x8303ea(0x160)]+')',this[_0x8303ea(0x135)][_0x8303ea(0x11e)][_0x8303ea(0x12b)]=_0x8303ea(0xf5);}[_0x341dbe(0xf8)](){const _0x116b0f=_0x341dbe;if(this[_0x116b0f(0x106)])return;const _0x1b4d46=0x64,_0x8cab92=this[_0x116b0f(0x126)]['scrollTop']+this[_0x116b0f(0x126)][_0x116b0f(0x158)]>=this[_0x116b0f(0x126)]['scrollHeight']-_0x1b4d46;_0x8cab92&&(this[_0x116b0f(0x106)]=!![],this[_0x116b0f(0x111)]());}[_0x341dbe(0x15e)](){const _0x5dd2ca=_0x341dbe,_0x541f21=this[_0x5dd2ca(0x103)]['value'][_0x5dd2ca(0xfc)]();this[_0x5dd2ca(0x11c)](_0x541f21)?(localStorage[_0x5dd2ca(0x110)](_0x5dd2ca(0x102),_0x541f21),this[_0x5dd2ca(0x129)][_0x5dd2ca(0x11e)][_0x5dd2ca(0x11f)]='none',this['mainApp']['style'][_0x5dd2ca(0x11f)]=_0x5dd2ca(0x10e),this['loginMessage'][_0x5dd2ca(0x15c)]=_0x5dd2ca(0x114)+_0x541f21,this[_0x5dd2ca(0x107)](),this[_0x5dd2ca(0x12f)](_0x541f21)):this[_0x5dd2ca(0x117)]['textContent']=_0x5dd2ca(0xf1);}[_0x341dbe(0x144)](){const _0x1f3cf4=_0x341dbe;localStorage[_0x1f3cf4(0x11b)]('userEmail'),localStorage['removeItem'](_0x1f3cf4(0x13c)+this['getCurrentUserEmail']()),localStorage['removeItem']('intervals_'+this['getCurrentUserEmail']()),this[_0x1f3cf4(0x129)][_0x1f3cf4(0x11e)]['display']='flex',this[_0x1f3cf4(0x118)][_0x1f3cf4(0x11e)][_0x1f3cf4(0x11f)]='none',this['scheduleBody']['innerHTML']='',this['loginMessage'][_0x1f3cf4(0x15c)]='',this[_0x1f3cf4(0x103)][_0x1f3cf4(0x124)]='',this[_0x1f3cf4(0x117)][_0x1f3cf4(0x15c)]='',this[_0x1f3cf4(0xf4)]['value']=_0x1f3cf4(0x137),this['lastGeneratedDate']=null;}[_0x341dbe(0x11c)](_0x2fb890){const _0x9270c4=_0x341dbe,_0x56ef6e=/^[^\s@]+@[^\s@]+\.[^\s@]+$/;return _0x56ef6e[_0x9270c4(0x13f)](_0x2fb890);}[_0x341dbe(0xff)](){const _0x34bb7b=_0x341dbe,_0x429a45=localStorage[_0x34bb7b(0xfa)](_0x34bb7b(0x102));_0x429a45&&(this['emailInput'][_0x34bb7b(0x124)]=_0x429a45,this[_0x34bb7b(0x15e)]());}[_0x341dbe(0x152)](){const _0x3f023a=_0x341dbe;return localStorage[_0x3f023a(0xfa)](_0x3f023a(0x102))||_0x3f023a(0x14f);}[_0x341dbe(0x120)](){const _0xc985cb=_0x341dbe,_0x2191c2=this[_0xc985cb(0x152)](),_0xf31c0={};document[_0xc985cb(0x14a)](_0xc985cb(0x108))[_0xc985cb(0x13a)](_0x40de6e=>{const _0x10093d=_0xc985cb,_0x2d127c=_0x40de6e['getAttribute'](_0x10093d(0x121)),_0x4107c5=Array[_0x10093d(0x12e)](_0x40de6e[_0x10093d(0x123)])[_0x10093d(0x139)](_0x1dc321=>_0x1dc321[_0x10093d(0x112)][_0x10093d(0x15c)][_0x10093d(0xfc)]());_0x4107c5[_0x10093d(0x101)]>0x0&&(_0xf31c0[_0x2d127c]=_0x4107c5);}),localStorage[_0xc985cb(0x110)](_0xc985cb(0x13c)+_0x2191c2,JSON[_0xc985cb(0x133)](_0xf31c0)),localStorage['setItem'](_0xc985cb(0x15b)+_0x2191c2,this[_0xc985cb(0xf4)][_0xc985cb(0x124)]);}[_0x341dbe(0x12f)](_0x40a471){const _0x46b627=_0x341dbe,_0x9f65da=localStorage[_0x46b627(0xfa)]('topics_'+_0x40a471),_0x2e4085=localStorage[_0x46b627(0xfa)](_0x46b627(0x15b)+_0x40a471);_0x2e4085&&(this[_0x46b627(0xf4)]['value']=_0x2e4085);if(_0x9f65da){const _0x320566=JSON[_0x46b627(0x127)](_0x9f65da);Object[_0x46b627(0x11a)](_0x320566)[_0x46b627(0x13a)](([_0xb48c1c,_0xae937])=>{const _0x5bd7ad=_0x46b627,_0xee76fe=document['querySelector'](_0x5bd7ad(0x14e)+_0xb48c1c+'\x22]');_0xee76fe&&(_0xee76fe['innerHTML']='',_0xae937[_0x5bd7ad(0x13a)](_0x47744c=>{const _0x1e1527=_0x5bd7ad,_0x2e9566=new Date(_0xb48c1c);this[_0x1e1527(0x151)](_0xee76fe,_0x47744c,_0x2e9566);}));});}}[_0x341dbe(0x107)](){const _0x499b85=_0x341dbe,_0x5390cc=new Date();this[_0x499b85(0xf9)](_0x5390cc,!![]);}[_0x341dbe(0xf9)](_0x4abce7,_0x3f7479=![]){const _0x4afb91=_0x341dbe,_0x962430=0x16d*this[_0x4afb91(0x161)];for(let _0x3d15a5=0x0;_0x3d15a5<_0x962430;_0x3d15a5++){const _0x4f96da=new Date(_0x4abce7);_0x4f96da[_0x4afb91(0x156)](_0x4abce7[_0x4afb91(0x154)]()+_0x3d15a5),this[_0x4afb91(0x122)](_0x4f96da);}this['lastGeneratedDate']=new Date(_0x4abce7),this[_0x4afb91(0x131)][_0x4afb91(0x156)](_0x4abce7[_0x4afb91(0x154)]()+_0x962430-0x1),this[_0x4afb91(0x106)]=![];}[_0x341dbe(0x122)](_0x3b8ece){const _0x5662d9=_0x341dbe,_0x598f7f=document[_0x5662d9(0x138)]('tr'),_0xa8f194=document[_0x5662d9(0x138)]('td'),_0x3d613f=document[_0x5662d9(0x138)]('td');_0xa8f194['textContent']=_0x3b8ece[_0x5662d9(0x150)](),_0xa8f194['setAttribute'](_0x5662d9(0xfe),_0x3b8ece[_0x5662d9(0x136)]()[_0x5662d9(0x134)]('T')[0x0]),_0x3d613f[_0x5662d9(0x159)]('data-date',_0x3b8ece['toISOString']()['split']('T')[0x0]),_0x3d613f[_0x5662d9(0xf6)][_0x5662d9(0x10b)]('topic-cell'),_0x598f7f[_0x5662d9(0x15f)](_0xa8f194),_0x598f7f[_0x5662d9(0x15f)](_0x3d613f),this['scheduleBody'][_0x5662d9(0x15f)](_0x598f7f);}['addTopic'](){const _0x4905f4=_0x341dbe,_0x15c15b=this[_0x4905f4(0x13b)][_0x4905f4(0x124)][_0x4905f4(0xfc)](),_0x29deba=new Date(this[_0x4905f4(0x104)][_0x4905f4(0x124)]),_0x45cdc7=this[_0x4905f4(0x147)](this[_0x4905f4(0xf4)][_0x4905f4(0x124)]);_0x15c15b&&this['dateInput'][_0x4905f4(0x124)]&&_0x45cdc7[_0x4905f4(0x101)]>0x0&&(_0x45cdc7[_0x4905f4(0x13a)](_0x58c7ee=>{const _0x5015ad=_0x4905f4,_0x2add73=new Date(_0x29deba);_0x2add73[_0x5015ad(0x156)](_0x29deba['getDate']()+_0x58c7ee);const _0x13bf09=_0x2add73[_0x5015ad(0x136)]()[_0x5015ad(0x134)]('T')[0x0],_0x14ea32=document['querySelector']('[data-date=\x22'+_0x13bf09+'\x22]');_0x14ea32&&this[_0x5015ad(0x151)](_0x14ea32,_0x15c15b,_0x29deba);}),this[_0x4905f4(0x13b)]['value']='',this[_0x4905f4(0x120)]());}[_0x341dbe(0x147)](_0x3c259f){const _0xffd44=_0x341dbe;return _0x3c259f[_0xffd44(0x134)](',')['map'](_0xde411b=>parseInt(_0xde411b['trim'](),0xa))['filter'](_0x2d45b2=>!isNaN(_0x2d45b2)&&_0x2d45b2>0x0)['sort']((_0x849752,_0x21a545)=>_0x849752-_0x21a545);}[_0x341dbe(0x151)](_0x46b44e,_0x16515b,_0x299e8e){const _0x434e9f=_0x341dbe,_0x19f1a7=document[_0x434e9f(0x138)]('span');_0x19f1a7[_0x434e9f(0x146)]=_0x16515b+_0x434e9f(0x128)+_0x299e8e['toISOString']()[_0x434e9f(0x134)]('T')[0x0]+_0x434e9f(0x10a)+_0x16515b+_0x434e9f(0x14b);const _0x49dbc4=_0x19f1a7[_0x434e9f(0x13e)]('.delete-topic');_0x49dbc4['addEventListener'](_0x434e9f(0x141),_0x1f3cfe=>{const _0x256dbd=_0x434e9f,_0x3fcf03=_0x1f3cfe[_0x256dbd(0x12d)][_0x256dbd(0x13d)],_0x707842=_0x3fcf03[_0x256dbd(0x13d)];_0x3fcf03['remove'](),this[_0x256dbd(0x120)]();}),!Array[_0x434e9f(0x12e)](_0x46b44e[_0x434e9f(0x123)])[_0x434e9f(0x155)](_0x12f29a=>_0x12f29a[_0x434e9f(0x112)][_0x434e9f(0x15c)][_0x434e9f(0xfc)]()===_0x16515b)&&_0x46b44e['appendChild'](_0x19f1a7);}[_0x341dbe(0x111)](){const _0x3017f5=_0x341dbe;if(this['lastGeneratedDate']){const _0x1723c5=new Date(this['lastGeneratedDate']);_0x1723c5[_0x3017f5(0x156)](_0x1723c5[_0x3017f5(0x154)]()+0x1),this[_0x3017f5(0xf9)](_0x1723c5);}}}function _0x30f6(){const _0x36606b=['scroll','applyZoom','querySelectorAll','\x22>❌</span>','zoomOutBtn','5286912tUZQEl','.topic-cell[data-date=\x22','default_user','toLocaleDateString','insertTopicInCell','getCurrentUserEmail','min','getDate','some','setDate','max','clientHeight','setAttribute','4815986duSvbE','intervals_','textContent','setupEventListeners','login','appendChild','currentZoom','yearsToGenerate','tableZoom','Please\x20enter\x20a\x20valid\x20email\x20address','addTopic','addEventListener','intervalsInput','top\x20left','classList','valueAsDate','debouncedLoadMoreDays','generateDaysFromDate','getItem','1430780txRoqT','trim','1MygqGd','data-original-date','checkLoginStatus','6TElFHJ','length','userEmail','emailInput','dateInput','253215GsuboI','isLoading','generateInitialSchedule','.topic-cell','toString','\x22\x20data-topic=\x22','add','getElementById','loginBtn','block','scale(','setItem','loadMoreDays','firstChild','zoomInBtn','Logged\x20in\x20as\x20','scheduleBody','1506860TTWvgh','loginError','mainApp','keypress','entries','removeItem','isValidEmail','transform','style','display','saveUserTopics','data-date','addDateRow','children','value','key','scheduleContainer','parse','\x20<span\x20class=\x22delete-topic\x22\x20data-original-date=\x22','loginContainer','addTopicBtn','transformOrigin','3654045NRmroR','target','from','loadUserTopics','logoutBtn','lastGeneratedDate','zoom','stringify','split','scheduleTable','toISOString','1,3,7,14','createElement','map','forEach','topicInput','topics_','parentElement','querySelector','test','bind','click','loginMessage','1172556WjzNqq','logout','Enter','innerHTML','parseIntervals'];_0x30f6=function(){return _0x36606b;};return _0x30f6();}new SpacedRepetitionSchedule();
     </script>
 </body>
 </html>
+   
